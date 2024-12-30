@@ -32,15 +32,37 @@ func main() {
 		}
 	}()
 
-	conn, e := net.Dial("tcp", "127.0.0.1:5585")
-	//conn, e := net.Dial("tcp", "8.8.8.8:443")
-	if e != nil {
+	k := make([]byte, 1)
+
+	// First handshake
+	{
+		conn, e := net.Dial("tcp", "127.0.0.1:5585")
+		//conn, e := net.Dial("tcp", "192.168.0.1:80")
+		if e != nil {
+			fmt.Println(e)
+		}
+
+		k, _, e = client_handshake(conn, 1, nil)
+		fmt.Println("Client shared key: " + hex.EncodeToString(k))
 		fmt.Println(e)
+
+		conn.Close()
 	}
 
-	k, _, e := client_handshake(conn, -1)
-	fmt.Println("Client shared key: " + hex.EncodeToString(k))
-	fmt.Println(e)
+	// Restore connect
+	{
+		conn, e := net.Dial("tcp", "127.0.0.1:5585")
+		//conn, e := net.Dial("tcp", "192.168.0.1:80")
+		if e != nil {
+			fmt.Println(e)
+		}
+
+		k, _, e := client_handshake(conn, 1, k)
+		fmt.Println("Client shared key: " + hex.EncodeToString(k))
+		fmt.Println(e)
+
+		conn.Close()
+	}
 
 	for true {
 	}

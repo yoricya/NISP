@@ -11,8 +11,8 @@ import (
 // (Условия рукопожатия создает клиент)
 
 // Клиентская часть рукопожатия
-func client_handshake(conn net.Conn, uniqueID int64) ([]byte, net.Conn, error) {
-	hash, e := start_client_handshake(conn, uniqueID)
+func client_handshake(conn net.Conn, uniqueID int64, restore []byte) ([]byte, net.Conn, error) {
+	hash, e := start_client_handshake(conn, uniqueID, restore)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -27,11 +27,24 @@ func client_handshake(conn net.Conn, uniqueID int64) ([]byte, net.Conn, error) {
 	return hash, cipConn, nil
 }
 
-func start_client_handshake(conn net.Conn, uniqueID int64) ([]byte, error) {
+func start_client_handshake(conn net.Conn, uniqueID int64, restore []byte) ([]byte, error) {
 	//_________________________ Шаг 1 (Отправляем параметры)
 
 	// Отправляем 2 пустых байта
-	conn.Write(make([]byte, 2))
+	dat := make([]byte, 2)
+	if restore != nil {
+		dat[0] = 1
+	}
+	conn.Write(dat)
+
+	if restore != nil {
+		// Отправляем uniqueId
+		unique_b := make([]byte, 8)
+		binary.LittleEndian.PutUint64(unique_b, uint64(uniqueID))
+		conn.Write(unique_b)
+
+		return restore, nil
+	}
 
 	// Отправляем простое число
 	prime := rand2.Intn(10000)

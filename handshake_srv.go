@@ -6,20 +6,22 @@ import (
 	"errors"
 	rand2 "math/rand"
 	"net"
+	"sync"
 )
 
 type NISPServerConnect struct {
-	sharedKey    []byte
-	originalConn net.Conn
-	securedConn  net.Conn
-	clientID     int64
+	sharedKey      []byte
+	originalConn   net.Conn
+	securedConn    net.Conn
+	clientID       int64
+	restoreConnect bool
 }
 
 // (Условия рукопожатия создает клиент)
 
 // Серверная часть рукопожатия
 func srv_handshake(conn net.Conn) (*NISPServerConnect, error) {
-	clientid, key, err := start_srv_handshake(conn)
+	isRestored, clientid, key, err := start_srv_handshake(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -34,20 +36,51 @@ func srv_handshake(conn net.Conn) (*NISPServerConnect, error) {
 	}
 
 	nisp := &NISPServerConnect{
-		sharedKey:    key,
-		originalConn: conn,
-		securedConn:  cipConn,
-		clientID:     clientid,
+		sharedKey:      key,
+		originalConn:   conn,
+		securedConn:    cipConn,
+		clientID:       clientid,
+		restoreConnect: isRestored,
+	}
+
+	if !isRestored && clientid != -1 {
+		server_cached_handshakes.Store(clientid, nisp)
 	}
 
 	return nisp, nil
 }
 
-func start_srv_handshake(conn net.Conn) (int64, []byte, error) {
+var server_cached_handshakes sync.Map
+
+func start_srv_handshake(conn net.Conn) (bool, int64, []byte, error) {
 	//_________________________ Шаг 1 (Получаем параметры)
 
-	// Пропускаем 2 байта
-	conn.Read(make([]byte, 2))
+	dat := make([]byte, 2)
+	conn.Read(dat)
+
+	if dat[0] > 10 {
+		return false, 0, nil, errors.New("client maybe not support nisp")
+	}
+
+	if dat[0] == 1 { // Is restore connect
+		// Читаем uniqueID
+		uniqId_b := make([]byte, 8)
+		conn.Read(uniqId_b)
+		clid := int64(int(binary.LittleEndian.Uint64(uniqId_b)))
+
+		if clid == 0 {
+			return false, 0, nil, errors.New("[restore connect] uniqueID is zero")
+		}
+
+		hs, ok := server_cached_handshakes.Load(clid)
+		if !ok || clid == -1 {
+			return false, 0, nil, errors.New("[restore connect] cant be restore")
+		}
+
+		nisp := hs.(*NISPServerConnect)
+
+		return true, nisp.clientID, nisp.sharedKey, nil
+	}
 
 	// Читаем простое число
 	prime_b := make([]byte, 8)
@@ -68,7 +101,7 @@ func start_srv_handshake(conn net.Conn) (int64, []byte, error) {
 	clid := int(binary.LittleEndian.Uint64(uniqId_b))
 
 	if clid == 0 {
-		return 0, nil, errors.New("uniqueID is zero")
+		return false, 0, nil, errors.New("uniqueID is zero")
 	}
 
 	//_________________________ Шаг 2 (Создаем ключи сервера)
@@ -103,7 +136,7 @@ func start_srv_handshake(conn net.Conn) (int64, []byte, error) {
 
 	// Получаем финальный ключ через SHA256
 	hash := sha256.Sum256(sharedSecret_b)
-	return int64(clid), hash[:], nil
+	return false, int64(clid), hash[:], nil
 }
 
 func check_server_handshake(conn net.Conn) bool {
